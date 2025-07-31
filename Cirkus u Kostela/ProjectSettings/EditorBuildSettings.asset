@@ -17,6 +17,12 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/Win.unity
     guid: 4330c0c2494b0434597c0774e9cbbb02
+  - enabled: 1
+    path: Assets/Scenes/DeathFoxy.unity
+    guid: f564308f6573c1844b45fd25ac5e457a
+  - enabled: 1
+    path: Assets/Scenes/DeathMyval.unity
+    guid: 1f55f109f472d5047a69a8ffcbf58f18
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   m_UseUCBPForAssetBundles: 0

@@ -8,6 +8,8 @@ public class GameManager : MonoBehaviour
     public enum GameLevel { Level1, Level2, Level3 }
     public GameLevel currentLevel = GameLevel.Level1;
 
+    public int sunday = 1; // Aktuální noc (1 = první noc, 2 = druhá noc, atd.) // UPRAVA
+
     private float gameTime = 0f;
     private float timeLimit = 120f; // Délka kola (5 minut)
 
@@ -15,12 +17,18 @@ public class GameManager : MonoBehaviour
     private float speedIncreaseRate = 0.1f;
     private float maxSpeed = 10f;
     public bool dvereZamceny { get; private set; } // Přístup pouze pro čtení
-    
 
     private bool gameWon = false;
     public bool canContinue = false; // Odemyká tlačítko Continue
 
     private bool jsouDvereObsazene = false; // Nová proměnná pro stav dveří
+
+    public enum TypProhry
+    {
+        Klasická,
+        FoxyJumpscare,
+        MyvalJumpscare
+    }
 
     private void Awake()
     {
@@ -41,6 +49,14 @@ public class GameManager : MonoBehaviour
 
         gameTime += Time.deltaTime;
 
+        // 🎮 Klávesová zkratka: Ctrl + S → přeskočí level
+        if ((Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) && Input.GetKeyDown(KeyCode.S))
+        {
+            Debug.Log("⏩ Přeskakuji level pomocí Ctrl+S");
+            NextLevel();
+            return;
+        }
+
         // Dynamické zrychlování nepřátel
         moveSpeed = 1f + (speedIncreaseRate * gameTime);
         moveSpeed = Mathf.Min(moveSpeed, maxSpeed);
@@ -51,6 +67,7 @@ public class GameManager : MonoBehaviour
             WinGame();
         }
     }
+
 
     public float GetMoveSpeed()
     {
@@ -67,57 +84,87 @@ public class GameManager : MonoBehaviour
         if (gameWon) return;
 
         gameWon = true;
-        canContinue = true; // Povolit tlačítko Continue
+        canContinue = true;
         Debug.Log("🎉 Vyhrál jsi! Přesun do menu...");
 
-        PlayerPrefs.SetInt("CanContinue", 1); // Uložit možnost pokračovat
-        SceneManager.LoadScene("Win"); // Přesměrovat na výherní obrazovku
+        PlayerPrefs.SetInt("CanContinue", 1);
+        SceneManager.LoadScene("Win");
     }
 
     public void LoseGame()
     {
         Debug.Log("💀 Prohrál jsi!");
-        SceneManager.LoadScene("Death"); // Přesměrování na obrazovku smrti
+        SceneManager.LoadScene("Death");
+    }
+    public void LoseGameFoxy()
+    {
+        Debug.Log("💀 Prohrál jsi!");
+        SceneManager.LoadScene("Death 1");
+    }
+    public void LosegameMyval()
+    {
+        Debug.Log("💀 Prohrál jsi!");
+        SceneManager.LoadScene("Death 2");
     }
 
-    // Metoda pro restartování hry
     public void RestartGame()
     {
         Debug.Log("Restartování hry...");
-        PlayerPrefs.SetInt("CanContinue", 0); // Resetování možnosti pokračovat
-        gameTime = 0f;
-        gameWon = false;
-        canContinue = false;
-        currentLevel = GameLevel.Level1; // Nastavení na první úroveň
-        SceneManager.LoadScene("Game"); // Načte hru znovu
-    }
-
-    // Metoda pro začátek nové hry
-    public void NewGame()
-    {
-        PlayerPrefs.SetInt("CanContinue", 0); // Resetovat možnost pokračovat
+        PlayerPrefs.SetInt("CanContinue", 0);
         gameTime = 0f;
         gameWon = false;
         canContinue = false;
         currentLevel = GameLevel.Level1;
+        sunday = 1; // resetujeme noc na 1 // UPRAVA
         SceneManager.LoadScene("Game");
     }
 
-    // Metoda pro přechod na další level
+    public void NewGame()
+    {
+        PlayerPrefs.SetInt("CanContinue", 0);
+        gameTime = 0f;
+        gameWon = false;
+        canContinue = false;
+        currentLevel = GameLevel.Level1;
+        sunday = 1; // resetujeme noc na 1 // UPRAVA
+        SceneManager.LoadScene("Game");
+    }
+
+    // Přidána metoda pro přechod na další noc
+    public void NextNight() // UPRAVA
+    {
+        sunday++;
+        gameTime = 0f;
+        Debug.Log("Přechod na noc: " + sunday);
+    }
+
+    // Upravena metoda NextLevel - nastaví noc na 1
     public void NextLevel()
     {
-        if (currentLevel == GameLevel.Level1) currentLevel = GameLevel.Level2;
-        else if (currentLevel == GameLevel.Level2) currentLevel = GameLevel.Level3;
+        if (currentLevel == GameLevel.Level1)
+        {
+            currentLevel = GameLevel.Level2;
+            sunday = 1;
+        }
+        else if (currentLevel == GameLevel.Level2)
+        {
+            currentLevel = GameLevel.Level3;
+        }
         else
         {
             Debug.Log("Jsi na posledním levelu!");
             return;
         }
-        timeLimit =+ 60f;
+
+        PlayerPrefs.SetInt("CanContinue", 1); // ✅ ULOŽIT možnost pokračovat
+        PlayerPrefs.Save();                   // ✅ Uložit trvale
+
+        timeLimit += 60f;
         gameTime = 0f;
         gameWon = false;
         SceneManager.LoadScene("Game");
     }
+
 
     public void GoToMainMenu()
     {
@@ -129,7 +176,6 @@ public class GameManager : MonoBehaviour
         Application.Quit();
     }
 
-    // Metody pro správu stavu dveří
     public bool JsouDvereObsazene()
     {
         return jsouDvereObsazene;
@@ -154,5 +200,26 @@ public class GameManager : MonoBehaviour
     public float GetTimeRemaining()
     {
         return gameTime;
+    }
+
+    public void SpustitProhru(TypProhry typ)
+    {
+        switch (typ)
+        {
+            case TypProhry.Klasická:
+                Debug.Log("Klasická prohra – načítám lose screen.");
+                SceneManager.LoadScene("Death");
+                break;
+
+            case TypProhry.FoxyJumpscare:
+                Debug.Log("Jumpscare prohra – přehrávám animaci na místě.");
+                SceneManager.LoadScene("DeathFoxy");
+                break;
+
+            case TypProhry.MyvalJumpscare:
+                Debug.Log("Cinematic prohra – přepínám na scénu s robotem.");
+                SceneManager.LoadScene("DeathMyval");
+                break;
+        }
     }
 }

@@ -1,126 +1,169 @@
 using UnityEngine;
+using System.Collections.Generic;
 
-public class Dvere : MonoBehaviour
+public class Dveře : MonoBehaviour
 {
-    public float lockTime = 5f; // Doba, po kterou budou dveře zamčené
-    public AudioClip lockSound; // Zvuk při zamčení
-    public AudioClip unlockSound; // Zvuk při odemčení
-    public AudioClip dvereObsazeneSound; // Zvuk, když jsou dveře obsazené
-    public float robotTimeLimit = 10f; // Časový limit pro zamčení dveří, když je robot u dveří
+    [Header("Kamery")]
+    public Camera defaultCamera;
+    public Camera closeupCamera;
 
-    private bool zamceno = false; // Určuje, zda jsou dveře zamčené
-    private float robotTimer = 0f; // Časovač pro robotův útok
-    private AudioSource audioSource; // Komponenta pro přehrávání zvuků
-    private bool hrajeZvukObsazeni = false; // Zabraňuje opakovanému přehrávání zvuku
+    [Header("Dveře (otočné)")]
+    public Transform doorTransform;
+    public Vector3 openRotationEuler;
+    public Vector3 closedRotationEuler;
+    public float rotationSpeed = 5f;
+    public KeyCode holdKey = KeyCode.LeftShift;
 
-    private void Start()
+    [Header("Nepřátelé")]
+    public List<Laboři> nepratele;
+    public Transform doorWaypoint;
+
+    [Header("Nastavení")]
+    public float autoReturnTime = 10f;
+    public float timeToHoldDoor = 1f;
+
+    private float doorHoldTimer = 0f;
+    private bool isCloseupActive = false;
+    private float inactivityTimer = 0f;
+
+    private Quaternion openRotation;
+    private Quaternion closedRotation;
+
+    // Nové proměnné pro obranu dveří
+    private bool robotJeUtechDveri = false;
+    private float timeSinceRobotArrived = 0f;
+    private bool podminkySplneny = false;
+
+    void Start()
     {
-        // Získání nebo přidání komponenty AudioSource
-        audioSource = GetComponent<AudioSource>();
-        if (audioSource == null)
-        {
-            audioSource = gameObject.AddComponent<AudioSource>();
-        }
+        if (doorTransform == null) doorTransform = this.transform;
+
+        openRotation = Quaternion.Euler(openRotationEuler);
+        closedRotation = Quaternion.Euler(closedRotationEuler);
+
+        doorTransform.localRotation = openRotation;
+
+        SetToDefaultCamera();
     }
 
-    private void Update()
+    void Update()
     {
-        // Kontrola, zda jsou dveře obsazené
-        if (GameManager.Instance != null && GameManager.Instance.JsouDvereObsazene())
+        bool isHolding = Input.GetKey(holdKey);
+        Quaternion targetRot = isHolding ? closedRotation : openRotation;
+        doorTransform.localRotation = Quaternion.Lerp(doorTransform.localRotation, targetRot, Time.deltaTime * rotationSpeed);
+
+        Laboři nepritelZaDvermi = GetEnemyAtDoor();
+
+        if (nepritelZaDvermi != null)
         {
-            if (!hrajeZvukObsazeni)
+            nepritelZaDvermi.UpdateDoorWatch(isHolding && isCloseupActive, Time.deltaTime, () =>
             {
-                // Přehrát zvuk obsazení dveří
-                if (dvereObsazeneSound != null)
+                Debug.Log("Nepřítel provedl jumpscare přes dveře!");
+                TriggerJumpscare(nepritelZaDvermi);
+            });// Robot právě dorazil k dveřím
+            if (!robotJeUtechDveri)
+            {
+                robotJeUtechDveri = true;
+                timeSinceRobotArrived = 0f;
+                podminkySplneny = false;
+                doorHoldTimer = 0f;
+
+                Debug.Log("Nepřítel dorazil k dveřím. Máš 5 sekund na jejich uzavření!");
+            }
+
+            timeSinceRobotArrived += Time.deltaTime;
+
+            // Sleduj, jestli hráč drží dveře
+            if (isHolding && isCloseupActive)
+            {
+                doorHoldTimer += Time.deltaTime;
+
+                if (doorHoldTimer >= timeToHoldDoor && !podminkySplneny)
                 {
-                    audioSource.PlayOneShot(dvereObsazeneSound);
-                    hrajeZvukObsazeni = true; // Zabrání opakovanému přehrávání
+                    podminkySplneny = true;
+                    Debug.Log("Dveře byly udrženy zavřené dostatečně dlouho. Hráč přežil útok.");
+                    nepritelZaDvermi.StopWatchingAtDoor();
+                    robotJeUtechDveri = false;
                 }
-                else
-                {
-                    Debug.LogWarning("Není nastaven zvuk obsazení dveří!");
-                }
+            }
+            else
+            {
+                doorHoldTimer = 0f;
+            }
+
+            // Pokud uplynulo 5 sekund a podmínky nebyly splněny, spustit jumpscare
+            if (timeSinceRobotArrived >= 5f && !podminkySplneny)
+            {
+                Debug.Log("Hráč nezavřel dveře včas. Spouštím jumpscare.");
+                TriggerJumpscare(nepritelZaDvermi);
+                robotJeUtechDveri = false;
             }
         }
         else
         {
-            hrajeZvukObsazeni = false; // Resetovat stav pro další přehrání
+            // Reset, pokud u dveří není nepřítel
+            robotJeUtechDveri = false;
+            timeSinceRobotArrived = 0f;
+            podminkySplneny = false;
+            doorHoldTimer = 0f;
         }
 
-        // Pokud je robot u dveří a dveře nejsou zamčené, spusťte časovač
-        if (GameManager.Instance != null && GameManager.Instance.JsouDvereObsazene() && !zamceno)
-        {
-            robotTimer += Time.deltaTime;
+        // Kamera: návrat po neaktivitě
+        inactivityTimer = isHolding ? 0f : inactivityTimer + Time.deltaTime;
 
-            // Pokud čas vypršel, hráč prohrál
-            if (robotTimer >= robotTimeLimit)
+        if (Input.GetKeyDown(KeyCode.Escape) || inactivityTimer >= autoReturnTime)
+        {
+            SetToDefaultCamera();
+        }
+    }
+
+    void OnMouseDown()
+    {
+        if (!isCloseupActive)
+        {
+            SetToCloseupCamera();
+        }
+    }
+
+    void SetToCloseupCamera()
+    {
+        if (defaultCamera != null) defaultCamera.enabled = false;
+        if (closeupCamera != null) closeupCamera.enabled = true;
+
+        isCloseupActive = true;
+        inactivityTimer = 0f;
+    }
+
+    void SetToDefaultCamera()
+    {
+        if (defaultCamera != null) defaultCamera.enabled = true;
+        if (closeupCamera != null) closeupCamera.enabled = false;
+
+        isCloseupActive = false;
+        inactivityTimer = 0f;
+        doorHoldTimer = 0f;
+
+        if (doorTransform != null)
+        {
+            doorTransform.localRotation = openRotation;
+        }
+    }
+
+    Laboři GetEnemyAtDoor()
+    {
+        foreach (var nepritel in nepratele)
+        {
+            if (nepritel != null && nepritel.GetCurrentWaypoint() == doorWaypoint)
             {
-                Debug.Log("💀 Robot tě dostal!");
-                GameManager.Instance.LoseGame(); // Zavolá metodu pro prohru v GameManager
+                return nepritel;
             }
         }
+        return null;
     }
 
-    private void OnMouseDown()
+    void TriggerJumpscare(Laboři nepritel)
     {
-        if (!zamceno) // Pokud dveře nejsou zamčené, zamkni je
-        {
-            ZamknoutDvere();
-        }
-    }
-
-    private void ZamknoutDvere()
-    {
-        zamceno = true;
-        Debug.Log("Dveře byly zamčeny na " + lockTime + " sekund.");
-
-        // Přehrát zvuk zamčení, pokud je nastaven
-        if (lockSound != null)
-        {
-            audioSource.PlayOneShot(lockSound);
-        }
-        else
-        {
-            Debug.LogWarning("Není nastaven zvuk zamčení!");
-        }
-
-        // Informovat GameManager o stavu dveří
-        if (GameManager.Instance != null)
-        {
-            GameManager.Instance.AktualizovatStavDveri(zamceno);
-        }
-        else
-        {
-            Debug.LogError("GameManager není nalezen!");
-        }
-
-        // Spustit odemčení po uplynutí času
-        Invoke("OdemknoutDvere", lockTime);
-    }
-
-    private void OdemknoutDvere()
-    {
-        zamceno = false;
-        Debug.Log("Dveře byly odemčeny.");
-
-        // Přehrát zvuk odemčení, pokud je nastaven
-        if (unlockSound != null)
-        {
-            audioSource.PlayOneShot(unlockSound);
-        }
-        else
-        {
-            Debug.LogWarning("Není nastaven zvuk odemčení!");
-        }
-
-        // Informovat GameManager o stavu dveří
-        if (GameManager.Instance != null)
-        {
-            GameManager.Instance.AktualizovatStavDveri(zamceno);
-        }
-        else
-        {
-            Debug.LogError("GameManager není nalezen!");
-        }
+        Debug.Log($"Jumpscare! {nepritel.name} tě dostal za dveřmi!");
+        nepritel.TriggerSceneJumpscare();
     }
 }
